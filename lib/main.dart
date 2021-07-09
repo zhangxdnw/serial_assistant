@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 
+import 'util/serial_config.dart';
+
 void main() {
   runApp(MyApp());
 }
@@ -42,15 +44,36 @@ class MyHomePage extends StatefulWidget {
 
   final String title;
 
+  late SerialPort serialPort;
+
   @override
   _MyHomePageState createState() => _MyHomePageState();
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  final ports = List.generate(SerialPort.availablePorts.length,
-      (index) => SerialPort.availablePorts[index]);
+  var _portName = "";
+  var _serialConfig = SerialPortConfig();
+  bool _serialFlowControl = false;
+  bool _portIsOpen = false;
 
-  var portName = "";
+  @override
+  void initState() {
+    _serialConfig.baudRate = BaudRates[4];
+    _serialConfig.parity = Parity.None.index;
+    _serialConfig.bits = DataBits[3];
+    _serialConfig.stopBits = StopBits.One.value;
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    _serialConfig.dispose();
+    if (widget.serialPort.isOpen) {
+      widget.serialPort.close();
+    }
+    widget.serialPort.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -73,32 +96,203 @@ class _MyHomePageState extends State<MyHomePage> {
                       children: [
                         Text("Serial Port"),
                         Spacer(),
+                        initSerialPortWidget(),
+                      ],
+                    ),
+                  ), //PortName Select
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(children: [
+                      Text("Baud Rate"),
+                      Spacer(),
+                      DropdownButton(
+                          value: _serialConfig.baudRate,
+                          items: BaudRates.map((item) => DropdownMenuItem(
+                                child: Text(item.toString()),
+                                value: item,
+                              )).toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _serialConfig.baudRate = value as int;
+                            });
+                          })
+                    ]),
+                  ), //BaudRate Select
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Text('Parity'),
+                        Spacer(),
                         DropdownButton(
-                          value: portName,
-                          hint: Text("Port Name"),
-                          items: ports.map((item) =>
-                              DropdownMenuItem(child: Text(item), value: item)).toList(),
+                          value: _serialConfig.parity,
+                          items: Parity.values
+                              .map((item) => DropdownMenuItem(
+                                    child: Text(item.name),
+                                    value: item.index,
+                                  ))
+                              .toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _serialConfig.parity = value as int;
+                            });
+                          },
                         )
+                      ],
+                    ),
+                  ), //Parity
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Text("Data Bits"),
+                        Spacer(),
+                        DropdownButton(
+                          value: _serialConfig.bits,
+                          items: DataBits.map((item) => DropdownMenuItem(
+                              child: Text(item.toString()),
+                              value: item)).toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _serialConfig.bits = value as int;
+                            });
+                          },
+                        )
+                      ],
+                    ),
+                  ), // DataBit
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Text("Stop Bits"),
+                        Spacer(),
+                        DropdownButton(
+                          value: _serialConfig.stopBits,
+                          items: StopBits.values
+                              .map((item) => DropdownMenuItem(
+                                    child: Text(item.name),
+                                    value: item.value,
+                                  ))
+                              .toList(),
+                          onChanged: (value) {
+                            setState(() {
+                              _serialConfig.stopBits = value as int;
+                            });
+                          },
+                        )
+                      ],
+                    ),
+                  ), //StopBit
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        Row(
+                          children: [
+                            Text('Flow'),
+                            Checkbox(
+                                value: _serialFlowControl,
+                                onChanged: (value) {
+                                  setState(() {
+                                    _serialFlowControl = value!;
+                                    _serialConfig.setFlowControl(
+                                        _serialFlowControl ? 1 : 0);
+                                  });
+                                })
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            Text('RTS'),
+                            Checkbox(
+                                value: _serialConfig.rts > 0,
+                                onChanged: (value) {
+                                  setState(() {
+                                    if (value!) {
+                                      _serialConfig.rts = 1;
+                                    } else {
+                                      _serialConfig.rts = 0;
+                                    }
+                                  });
+                                })
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            Text('DTR'),
+                            Checkbox(
+                                value: _serialConfig.dtr > 0,
+                                onChanged: (value) {
+                                  setState(() {
+                                    if (value!) {
+                                      _serialConfig.dtr = 1;
+                                    } else {
+                                      _serialConfig.dtr = 0;
+                                    }
+                                  });
+                                })
+                          ],
+                        ),
                       ],
                     ),
                   ),
                   Padding(
                     padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                        children: [Text("Baud Rate"), Spacer(), Text("9600")]),
-                  ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 40,
+                      child: ElevatedButton(
+                        child: Text(_portIsOpen ? "Close" : "Open"),
+                        onPressed: () {
+                          if (!_portIsOpen) {
+                            widget.serialPort = SerialPort(_portName);
+                            widget.serialPort.config = _serialConfig;
+                            widget.serialPort
+                                .open(mode: SerialPortMode.readWrite);
+                            if (widget.serialPort.isOpen) {
+                              setState(() {
+                                _portIsOpen = widget.serialPort.isOpen;
+                              });
+                            } else {
+                              print(SerialPort.lastError);
+                            }
+                          } else {
+                            widget.serialPort.close();
+                            if (!widget.serialPort.isOpen) {
+                              setState(() {
+                                _portIsOpen = widget.serialPort.isOpen;
+                              });
+                            } else {
+                              print(SerialPort.lastError);
+                            }
+                          }
+                        },
+                      ),
+                    ),
+                  )
                 ],
               ))),
     );
   }
 
-  List<DropdownMenuItem> getCurrentPorts() {
-    List<DropdownMenuItem> items = List.empty(growable: true);
-    for (String port in SerialPort.availablePorts) {
-      DropdownMenuItem item =
-          new DropdownMenuItem(child: Text(port), value: port);
-      items.add(item);
+  Widget initSerialPortWidget() {
+    if (SerialPort.availablePorts.isEmpty) {
+      return Text("");
+    } else {
+      _portName = SerialPort.availablePorts.first;
+      return DropdownButton(
+        value: _portName,
+        items: SerialPort.availablePorts
+            .map((item) => DropdownMenuItem(child: Text(item), value: item))
+            .toList(),
+        onChanged: (value) {
+          setState(() {
+            _portName = value as String;
+          });
+        },
+      );
     }
-    return items;
   }
 }
